@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#0a1628">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="MilkLog">
+<title>🥛 Milk Tracker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700;900&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:#0a1628;--card:#0f2040;--card2:#132847;--border:#1e3a5f;
+    --accent:#5bc8f5;--accent2:#f5c842;--accent3:#7ee8a2;
+    --text:#e8f4fd;--muted:#6b8fa8;--danger:#f57272;--white:#ffffff;
+    --radius:18px;--shadow:0 8px 32px rgba(0,0,0,0.4);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;max-width:500px;margin:0 auto;padding:0 0 80px;overflow-x:hidden}
+  body::before{content:'';position:fixed;top:-100px;right:-100px;width:300px;height:300px;background:radial-gradient(circle,rgba(91,200,245,0.08) 0%,transparent 70%);pointer-events:none;z-index:0}
+  .header{background:linear-gradient(160deg,#0f2040 0%,#132847 100%);padding:48px 24px 28px;border-bottom:1px solid var(--border);position:relative;overflow:hidden}
+  .header::after{content:'🥛';position:absolute;right:24px;top:32px;font-size:56px;opacity:0.15;transform:rotate(-10deg)}
+  .header h1{font-family:'Playfair Display',serif;font-size:28px;font-weight:900;color:var(--white);letter-spacing:-0.5px}
+  .header h1 span{color:var(--accent)}
+  .header p{color:var(--muted);font-size:13px;margin-top:4px;font-weight:300}
+  .tabs{display:flex;background:var(--card);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:50}
+  .tab{flex:1;padding:14px 8px;text-align:center;font-size:12px;font-weight:600;letter-spacing:0.5px;color:var(--muted);cursor:pointer;transition:all 0.2s;border-bottom:2px solid transparent;text-transform:uppercase}
+  .tab.active{color:var(--accent);border-bottom-color:var(--accent);background:rgba(91,200,245,0.05)}
+  .section{display:none;padding:20px 16px;animation:fadeUp 0.3s ease}
+  .section.active{display:block}
+  @keyframes fadeUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:16px;box-shadow:var(--shadow)}
+  .card-title{font-family:'Playfair Display',serif;font-size:16px;font-weight:700;color:var(--text);margin-bottom:16px;display:flex;align-items:center;gap:8px}
+  .stats-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px}
+  .stat{background:var(--card2);border:1px solid var(--border);border-radius:14px;padding:16px 14px;text-align:center}
+  .stat-value{font-family:'Playfair Display',serif;font-size:26px;font-weight:900;color:var(--accent);line-height:1}
+  .stat-value.yellow{color:var(--accent2)}.stat-value.green{color:var(--accent3)}
+  .stat-label{font-size:11px;color:var(--muted);margin-top:4px;letter-spacing:0.3px}
+  .form-group{margin-bottom:14px}
+  label{display:block;font-size:12px;color:var(--muted);margin-bottom:6px;font-weight:500;letter-spacing:0.3px;text-transform:uppercase}
+  input[type="date"],input[type="number"],input[type="text"]{width:100%;background:var(--card2);border:1px solid var(--border);border-radius:10px;color:var(--text);font-size:16px;font-family:'DM Sans',sans-serif;padding:12px 14px;outline:none;transition:border-color 0.2s;-webkit-appearance:none}
+  input:focus{border-color:var(--accent)}
+  input[type="date"]::-webkit-calendar-picker-indicator{filter:invert(0.5)}
+  .input-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .btn{width:100%;padding:14px;border:none;border-radius:12px;font-size:15px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;transition:all 0.2s;display:flex;align-items:center;justify-content:center;gap:8px}
+  .btn-primary{background:var(--accent);color:#0a1628}
+  .btn-primary:active{transform:scale(0.97);background:#4ab8e5}
+  .btn-danger{background:transparent;border:1px solid var(--danger);color:var(--danger);font-size:13px;padding:8px 14px;width:auto;border-radius:8px}
+  .btn-sm{font-size:13px;padding:8px 14px;width:auto;border-radius:8px}
+  .btn-outline{background:transparent;border:1px solid var(--border);color:var(--text);margin-top:8px}
+  .entry-item{display:flex;align-items:center;padding:12px 0;border-bottom:1px solid var(--border);gap:12px}
+  .entry-item:last-child{border-bottom:none}
+  .entry-dot{width:36px;height:36px;background:rgba(91,200,245,0.12);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0}
+  .entry-info{flex:1;min-width:0}
+  .entry-date{font-size:13px;color:var(--muted)}
+  .entry-qty{font-family:'Playfair Display',serif;font-size:18px;font-weight:700;color:var(--text)}
+  .entry-cost{font-size:12px;color:var(--accent3)}
+  .entry-actions{display:flex;gap:6px}
+  .icon-btn{background:transparent;border:1px solid var(--border);color:var(--muted);border-radius:8px;width:32px;height:32px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:14px;transition:all 0.15s}
+  .icon-btn:hover{border-color:var(--danger);color:var(--danger)}
+  .month-nav{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
+  .month-label{font-family:'Playfair Display',serif;font-size:18px;font-weight:700;color:var(--white)}
+  .nav-btn{background:var(--card2);border:1px solid var(--border);color:var(--text);border-radius:10px;width:38px;height:38px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:18px;transition:all 0.15s}
+  .nav-btn:active{background:var(--border)}
+  .summary-table{width:100%;border-collapse:collapse}
+  .summary-table th{font-size:11px;color:var(--muted);text-align:left;padding:6px 0;letter-spacing:0.5px;text-transform:uppercase;border-bottom:1px solid var(--border)}
+  .summary-table td{font-size:14px;padding:10px 4px 10px 0;border-bottom:1px solid rgba(30,58,95,0.5);vertical-align:middle}
+  .summary-table tr:last-child td{border-bottom:none}
+  .td-bold{font-weight:600;color:var(--white)}.td-accent{color:var(--accent);font-weight:600}.td-green{color:var(--accent3);font-weight:600}
+  .cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-top:8px}
+  .cal-day-label{text-align:center;font-size:10px;color:var(--muted);padding:4px 0;font-weight:600;letter-spacing:0.3px}
+  .cal-day{aspect-ratio:1;border-radius:8px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:11px;cursor:pointer;transition:all 0.15s;background:var(--card2);border:1px solid transparent;position:relative}
+  .cal-day.empty{background:transparent;border:none;cursor:default}
+  .cal-day.has-entry{background:rgba(91,200,245,0.12);border-color:rgba(91,200,245,0.3)}
+  .cal-day.today{border-color:var(--accent2)}
+  .cal-day:not(.empty):active{transform:scale(0.92)}
+  .cal-day-num{font-size:12px;color:var(--text);line-height:1}
+  .cal-day-qty{font-size:9px;color:var(--accent);font-weight:600;margin-top:1px}
+  .cal-day.has-entry .cal-day-num{color:var(--accent)}
+  .setting-row{display:flex;align-items:center;justify-content:space-between;padding:12px 0;border-bottom:1px solid var(--border)}
+  .setting-row:last-child{border-bottom:none}
+  .setting-label{font-size:14px;color:var(--text);font-weight:500}
+  .setting-sub{font-size:12px;color:var(--muted);margin-top:2px}
+  #toast{position:fixed;bottom:90px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--accent3);color:#0a1628;padding:10px 22px;border-radius:100px;font-size:14px;font-weight:600;opacity:0;pointer-events:none;transition:all 0.3s;z-index:999;white-space:nowrap}
+  #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  .bottom-nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:500px;background:var(--card);border-top:1px solid var(--border);display:flex;z-index:100;padding-bottom:env(safe-area-inset-bottom,0)}
+  .nav-item{flex:1;padding:12px 8px;display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer;transition:all 0.2s;color:var(--muted);font-size:10px;font-weight:600;letter-spacing:0.3px;text-transform:uppercase;border:none;background:none}
+  .nav-item.active{color:var(--accent)}
+  .nav-icon{font-size:22px}
+  .empty-state{text-align:center;padding:40px 20px;color:var(--muted)}
+  .empty-state .icon{font-size:48px;margin-bottom:12px;opacity:0.4}
+  .empty-state p{font-size:14px}
+  ::-webkit-scrollbar{width:4px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px}
+  .bar-chart{display:flex;align-items:flex-end;gap:6px;height:80px;padding-top:8px}
+  .bar-wrap{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;height:100%;justify-content:flex-end}
+  .bar{width:100%;background:linear-gradient(to top,var(--accent) 0%,rgba(91,200,245,0.4) 100%);border-radius:4px 4px 0 0;min-height:2px;transition:height 0.5s ease}
+  .bar-label{font-size:9px;color:var(--muted)}
+  select{background:var(--card2);border:1px solid var(--border);border-radius:10px;color:var(--text);font-size:14px;font-family:'DM Sans',sans-serif;padding:10px 12px;outline:none;-webkit-appearance:none;width:100%}
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>Milk <span>Tracker</span></h1>
+  <p>Log daily milk · Calculate monthly costs</p>
+</div>
+<div class="tabs">
+  <div class="tab active" onclick="switchTab('today')">📅 Today</div>
+  <div class="tab" onclick="switchTab('calendar')">🗓 Calendar</div>
+  <div class="tab" onclick="switchTab('monthly')">📊 Monthly</div>
+  <div class="tab" onclick="switchTab('settings')">⚙️ Settings</div>
+</div>
+
+<!-- TODAY -->
+<div class="section active" id="tab-today">
+  <div class="stats-row">
+    <div class="stat"><div class="stat-value" id="todayQty">—</div><div class="stat-label">Today (L)</div></div>
+    <div class="stat"><div class="stat-value yellow" id="monthTotal">—</div><div class="stat-label">This Month (L)</div></div>
+    <div class="stat"><div class="stat-value green" id="monthCost">—</div><div class="stat-label">Month Cost</div></div>
+    <div class="stat"><div class="stat-value" id="entryCount">—</div><div class="stat-label">Days Logged</div></div>
+  </div>
+  <div class="card">
+    <div class="card-title">🥛 Log Entry</div>
+    <div class="form-group"><label>Date</label><input type="date" id="entryDate"></div>
+    <div class="input-row">
+      <div class="form-group"><label>Quantity (L)</label><input type="number" id="entryQty" placeholder="e.g. 1.5" step="0.1" min="0"></div>
+      <div class="form-group"><label>Price / Litre (₹)</label><input type="number" id="entryPrice" placeholder="e.g. 60" step="0.5" min="0"></div>
+    </div>
+    <button class="btn btn-primary" onclick="saveEntry()">✓ Save Entry</button>
+  </div>
+  <div class="card"><div class="card-title">📋 Recent Entries</div><div id="recentList"></div></div>
+</div>
+
+<!-- CALENDAR -->
+<div class="section" id="tab-calendar">
+  <div class="card">
+    <div class="month-nav">
+      <button class="nav-btn" onclick="calPrev()">‹</button>
+      <span class="month-label" id="calMonthLabel"></span>
+      <button class="nav-btn" onclick="calNext()">›</button>
+    </div>
+    <div class="cal-grid" id="calDaysLabel"></div>
+    <div class="cal-grid" id="calGrid"></div>
+  </div>
+  <div class="card" id="calDayDetail" style="display:none">
+    <div class="card-title">📌 Entry Detail</div>
+    <div id="calDetailContent"></div>
+  </div>
+</div>
+
+<!-- MONTHLY -->
+<div class="section" id="tab-monthly">
+  <div class="card">
+    <div class="month-nav">
+      <button class="nav-btn" onclick="summaryPrev()">‹</button>
+      <span class="month-label" id="summaryMonthLabel"></span>
+      <button class="nav-btn" onclick="summaryNext()">›</button>
+    </div>
+    <div class="stats-row">
+      <div class="stat"><div class="stat-value" id="sumTotal">—</div><div class="stat-label">Total Litres</div></div>
+      <div class="stat"><div class="stat-value green" id="sumCost">—</div><div class="stat-label">Total Cost</div></div>
+      <div class="stat"><div class="stat-value yellow" id="sumAvg">—</div><div class="stat-label">Avg/Day (L)</div></div>
+      <div class="stat"><div class="stat-value" id="sumDays">—</div><div class="stat-label">Days Logged</div></div>
+    </div>
+    <div class="card-title" style="margin-top:8px">📈 Weekly Trend</div>
+    <div class="bar-chart" id="weeklyChart"></div>
+  </div>
+  <div class="card"><div class="card-title">📅 All Entries</div><div id="monthlyList"></div></div>
+  <div class="card"><div class="card-title">📆 Year Summary</div><div id="yearSummary"></div></div>
+</div>
+
+<!-- SETTINGS -->
+<div class="section" id="tab-settings">
+  <div class="card">
+    <div class="card-title">⚙️ Preferences</div>
+    <div class="setting-row">
+      <div><div class="setting-label">Default Price / Litre (₹)</div><div class="setting-sub">Used when price not entered</div></div>
+      <input type="number" id="defaultPrice" style="width:90px;text-align:center" placeholder="60">
+    </div>
+    <div class="setting-row">
+      <div><div class="setting-label">Milk Type</div><div class="setting-sub">Label for your entries</div></div>
+      <select id="milkType" style="width:140px">
+        <option>Cow Milk</option><option>Buffalo Milk</option><option>Toned Milk</option>
+        <option>Full Cream</option><option>Skimmed</option><option>Other</option>
+      </select>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-title">💾 Data Management</div>
+    <button class="btn btn-primary" onclick="exportData()" style="margin-bottom:10px">⬇ Export as CSV</button>
+    <button class="btn btn-outline" onclick="importData()">⬆ Import CSV</button>
+    <input type="file" id="importFile" accept=".csv" style="display:none" onchange="handleImport(event)">
+    <div style="height:12px"></div>
+    <button class="btn btn-danger" style="width:100%" onclick="clearAllData()">🗑 Clear All Data</button>
+  </div>
+  <div class="card">
+    <div class="card-title">📱 Install as App</div>
+    <p style="font-size:13px;color:var(--muted);line-height:1.8">
+      <strong style="color:var(--text)">Android Chrome:</strong> Tap ⋮ menu → "Add to Home screen"<br>
+      <strong style="color:var(--text)">iPhone Safari:</strong> Tap Share 󰏓 → "Add to Home Screen"<br>
+      <strong style="color:var(--text)">Desktop Chrome:</strong> Click install icon in address bar
+    </p>
+  </div>
+  <div class="card" style="text-align:center">
+    <p style="font-size:12px;color:var(--muted)">Milk Tracker v1.0 · All data stored locally on your device</p>
+  </div>
+</div>
+
+<div id="toast"></div>
+<div class="bottom-nav">
+  <button class="nav-item active" onclick="switchTab('today')" id="nav-today"><span class="nav-icon">📅</span>Today</button>
+  <button class="nav-item" onclick="switchTab('calendar')" id="nav-calendar"><span class="nav-icon">🗓</span>Calendar</button>
+  <button class="nav-item" onclick="switchTab('monthly')" id="nav-monthly"><span class="nav-icon">📊</span>Monthly</button>
+  <button class="nav-item" onclick="switchTab('settings')" id="nav-settings"><span class="nav-icon">⚙️</span>Settings</button>
+</div>
+
+<script>
+const STORE_KEY='milktracker_entries';const PREF_KEY='milktracker_prefs';
+function loadEntries(){try{return JSON.parse(localStorage.getItem(STORE_KEY)||'{}')}catch{return{}}}
+function saveEntries(d){localStorage.setItem(STORE_KEY,JSON.stringify(d))}
+function loadPrefs(){try{return JSON.parse(localStorage.getItem(PREF_KEY)||'{}')}catch{return{}}}
+function savePrefs(p){localStorage.setItem(PREF_KEY,JSON.stringify(p))}
+let currentCalMonth=new Date();let currentSumMonth=new Date();
+currentCalMonth.setDate(1);currentSumMonth.setDate(1);
+function switchTab(id){
+  document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
+  document.getElementById('tab-'+id).classList.add('active');
+  const tabs=['today','calendar','monthly','settings'];
+  document.querySelectorAll('.tab')[tabs.indexOf(id)].classList.add('active');
+  document.getElementById('nav-'+id).classList.add('active');
+  if(id==='calendar')renderCalendar();if(id==='monthly')renderMonthly();
+}
+function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2500)}
+function setTodayDate(){document.getElementById('entryDate').value=new Date().toISOString().split('T')[0]}
+function getDefaultPrice(){const p=loadPrefs();return parseFloat(document.getElementById('defaultPrice')?.value||p.defaultPrice||60)}
+function saveEntry(){
+  const date=document.getElementById('entryDate').value;
+  const qty=parseFloat(document.getElementById('entryQty').value);
+  const price=parseFloat(document.getElementById('entryPrice').value)||getDefaultPrice();
+  if(!date){toast('⚠️ Please select a date');return}
+  if(!qty||qty<=0){toast('⚠️ Enter a valid quantity');return}
+  const entries=loadEntries();entries[date]={qty,price,saved:Date.now()};saveEntries(entries);
+  document.getElementById('entryQty').value='';
+  toast('✓ Entry saved!');renderToday();
+}
+function deleteEntry(date){
+  if(!confirm('Delete entry for '+date+'?'))return;
+  const entries=loadEntries();delete entries[date];saveEntries(entries);
+  renderToday();renderCalendar();toast('🗑 Entry deleted');
+}
+function renderToday(){
+  const entries=loadEntries();
+  const today=new Date().toISOString().split('T')[0];
+  const now=new Date();const ym=now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');
+  const te=entries[today];document.getElementById('todayQty').textContent=te?te.qty+'L':'—';
+  let mTotal=0,mCost=0,mDays=0;
+  Object.keys(entries).forEach(d=>{if(d.startsWith(ym)){mTotal+=entries[d].qty;mCost+=entries[d].qty*entries[d].price;mDays++}});
+  document.getElementById('monthTotal').textContent=mTotal>0?mTotal.toFixed(1):'—';
+  document.getElementById('monthCost').textContent=mCost>0?'₹'+Math.round(mCost):'—';
+  document.getElementById('entryCount').textContent=mDays||'—';
+  const sorted=Object.keys(entries).sort((a,b)=>b.localeCompare(a)).slice(0,7);
+  const list=document.getElementById('recentList');
+  if(sorted.length===0){list.innerHTML='<div class="empty-state"><div class="icon">🥛</div><p>No entries yet. Log your first!</p></div>';return}
+  list.innerHTML=sorted.map(d=>{
+    const e=entries[d];const cost=(e.qty*e.price).toFixed(0);
+    const dateObj=new Date(d+'T00:00:00');
+    const label=d===today?'Today':dateObj.toLocaleDateString('en-IN',{weekday:'short',day:'numeric',month:'short'});
+    return`<div class="entry-item"><div class="entry-dot">🥛</div><div class="entry-info"><div class="entry-date">${label}</div><div class="entry-qty">${e.qty} L <span style="font-size:12px;color:var(--muted);font-family:DM Sans">@ ₹${e.price}/L</span></div><div class="entry-cost">₹${cost} total</div></div><div class="entry-actions"><button class="icon-btn" onclick="deleteEntry('${d}')">🗑</button></div></div>`;
+  }).join('');
+}
+const DAYS=['Su','Mo','Tu','We','Th','Fr','Sa'];
+const MONTHS=['January','February','March','April','May','June','July','August','September','October','November','December'];
+function renderCalendar(){
+  const entries=loadEntries();const y=currentCalMonth.getFullYear();const m=currentCalMonth.getMonth();
+  const ym=y+'-'+String(m+1).padStart(2,'0');const firstDay=new Date(y,m,1).getDay();
+  const daysInM=new Date(y,m+1,0).getDate();const todayStr=new Date().toISOString().split('T')[0];
+  document.getElementById('calMonthLabel').textContent=MONTHS[m]+' '+y;
+  document.getElementById('calDaysLabel').innerHTML=DAYS.map(d=>`<div class="cal-day-label">${d}</div>`).join('');
+  let html='';
+  for(let i=0;i<firstDay;i++)html+=`<div class="cal-day empty"></div>`;
+  for(let d=1;d<=daysInM;d++){
+    const ds=ym+'-'+String(d).padStart(2,'0');const e=entries[ds];const isToday=ds===todayStr;
+    html+=`<div class="cal-day ${e?'has-entry':''} ${isToday?'today':''}" onclick="showCalDay('${ds}')"><span class="cal-day-num">${d}</span>${e?`<span class="cal-day-qty">${e.qty}L</span>`:''}</div>`;
+  }
+  document.getElementById('calGrid').innerHTML=html;
+}
+function showCalDay(ds){
+  const entries=loadEntries();const e=entries[ds];
+  const detail=document.getElementById('calDayDetail');const content=document.getElementById('calDetailContent');
+  const dateObj=new Date(ds+'T00:00:00');
+  const label=dateObj.toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
+  detail.style.display='block';
+  if(e){content.innerHTML=`<div style="display:flex;gap:16px;align-items:center"><div style="font-size:40px">🥛</div><div><div style="font-size:13px;color:var(--muted)">${label}</div><div style="font-family:'Playfair Display',serif;font-size:22px;font-weight:700">${e.qty} Litres</div><div style="font-size:13px;color:var(--accent3)">₹${(e.qty*e.price).toFixed(0)} total · ₹${e.price}/L</div></div></div><button class="btn btn-danger" style="margin-top:14px" onclick="deleteEntry('${ds}');document.getElementById('calDayDetail').style.display='none';renderCalendar()">🗑 Delete Entry</button>`}
+  else{content.innerHTML=`<div style="text-align:center;padding:12px 0;color:var(--muted)"><div style="font-size:13px">${label}</div><div style="margin:8px 0;font-size:30px;opacity:.4">🥛</div><div style="font-size:14px">No entry for this day.</div><button class="btn btn-primary btn-sm" style="margin-top:12px;width:auto;padding:8px 20px" onclick="prefillDate('${ds}')">+ Add Entry</button></div>`}
+  detail.scrollIntoView({behavior:'smooth',block:'nearest'});
+}
+function prefillDate(ds){switchTab('today');document.getElementById('entryDate').value=ds;document.getElementById('entryQty').focus()}
+function calPrev(){currentCalMonth.setMonth(currentCalMonth.getMonth()-1);renderCalendar()}
+function calNext(){currentCalMonth.setMonth(currentCalMonth.getMonth()+1);renderCalendar()}
+function renderMonthly(){
+  const entries=loadEntries();const y=currentSumMonth.getFullYear();const m=currentSumMonth.getMonth();
+  const ym=y+'-'+String(m+1).padStart(2,'0');
+  document.getElementById('summaryMonthLabel').textContent=MONTHS[m]+' '+y;
+  const mEntries={};let total=0,cost=0;
+  Object.keys(entries).filter(d=>d.startsWith(ym)).sort().forEach(d=>{mEntries[d]=entries[d];total+=entries[d].qty;cost+=entries[d].qty*entries[d].price});
+  const days=Object.keys(mEntries).length;const daysInMonth=new Date(y,m+1,0).getDate();
+  document.getElementById('sumTotal').textContent=total>0?total.toFixed(2):'—';
+  document.getElementById('sumCost').textContent=cost>0?'₹'+Math.round(cost):'—';
+  document.getElementById('sumAvg').textContent=days>0?(total/daysInMonth).toFixed(2):'—';
+  document.getElementById('sumDays').textContent=days||'—';
+  const weeks=[0,0,0,0,0];Object.keys(mEntries).forEach(d=>{const day=parseInt(d.split('-')[2]);const w=Math.min(Math.floor((day-1)/7),4);weeks[w]+=mEntries[d].qty});
+  const maxW=Math.max(...weeks,1);
+  document.getElementById('weeklyChart').innerHTML=weeks.map((v,i)=>`<div class="bar-wrap"><div class="bar" style="height:${Math.round((v/maxW)*100)}%;min-height:${v>0?'4px':'0'}"></div><div class="bar-label">W${i+1}</div></div>`).join('');
+  const list=document.getElementById('monthlyList');
+  if(days===0){list.innerHTML='<div class="empty-state"><div class="icon">📭</div><p>No entries for this month.</p></div>'}
+  else{list.innerHTML=`<table class="summary-table"><thead><tr><th>Date</th><th>Qty (L)</th><th>Rate</th><th>Amount</th></tr></thead><tbody>`+Object.keys(mEntries).sort((a,b)=>a.localeCompare(b)).map(d=>{const e=mEntries[d];const dateObj=new Date(d+'T00:00:00');const label=dateObj.toLocaleDateString('en-IN',{day:'numeric',month:'short'});return`<tr><td class="td-bold">${label}</td><td class="td-accent">${e.qty}</td><td style="color:var(--muted);font-size:13px">₹${e.price}</td><td class="td-green">₹${(e.qty*e.price).toFixed(0)}</td></tr>`}).join('')+`<tr style="border-top:2px solid var(--border)"><td class="td-bold">Total</td><td class="td-accent">${total.toFixed(2)}</td><td></td><td class="td-green">₹${Math.round(cost)}</td></tr></tbody></table>`}
+  const yearMonths={};Object.keys(entries).forEach(d=>{const ym2=d.substring(0,7);if(!yearMonths[ym2])yearMonths[ym2]={qty:0,cost:0};yearMonths[ym2].qty+=entries[d].qty;yearMonths[ym2].cost+=entries[d].qty*entries[d].price});
+  const yearKeys=Object.keys(yearMonths).filter(k=>k.startsWith(y+'')).sort();
+  document.getElementById('yearSummary').innerHTML=yearKeys.length===0?`<div class="empty-state"><div class="icon">📭</div><p>No data for ${y}.</p></div>`:`<table class="summary-table"><thead><tr><th>Month</th><th>Total (L)</th><th>Cost</th></tr></thead><tbody>`+yearKeys.map(k=>{const[yr,mo]=k.split('-');return`<tr><td class="td-bold">${MONTHS[parseInt(mo)-1].substring(0,3)} ${yr}</td><td class="td-accent">${yearMonths[k].qty.toFixed(2)}</td><td class="td-green">₹${Math.round(yearMonths[k].cost)}</td></tr>`}).join('')+`</tbody></table>`;
+}
+function summaryPrev(){currentSumMonth.setMonth(currentSumMonth.getMonth()-1);renderMonthly()}
+function summaryNext(){currentSumMonth.setMonth(currentSumMonth.getMonth()+1);renderMonthly()}
+function loadSettings(){const p=loadPrefs();if(p.defaultPrice)document.getElementById('defaultPrice').value=p.defaultPrice;if(p.milkType)document.getElementById('milkType').value=p.milkType}
+document.getElementById('defaultPrice').addEventListener('change',function(){const p=loadPrefs();p.defaultPrice=this.value;savePrefs(p)});
+document.getElementById('milkType').addEventListener('change',function(){const p=loadPrefs();p.milkType=this.value;savePrefs(p)});
+function exportData(){
+  const entries=loadEntries();const keys=Object.keys(entries).sort();
+  if(keys.length===0){toast('⚠️ No data to export');return}
+  let csv='Date,Quantity (L),Price per L,Total Cost\n';
+  keys.forEach(d=>{const e=entries[d];csv+=`${d},${e.qty},${e.price},${(e.qty*e.price).toFixed(2)}\n`});
+  const blob=new Blob([csv],{type:'text/csv'});const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');a.href=url;a.download='milk-tracker-'+new Date().toISOString().split('T')[0]+'.csv';a.click();URL.revokeObjectURL(url);
+  toast('⬇ Exported!');
+}
+function importData(){document.getElementById('importFile').click()}
+function handleImport(e){
+  const file=e.target.files[0];if(!file)return;
+  const reader=new FileReader();reader.onload=function(ev){
+    const lines=ev.target.result.trim().split('\n').slice(1);const entries=loadEntries();let count=0;
+    lines.forEach(line=>{const parts=line.split(',');if(parts.length>=3){const date=parts[0].trim();const qty=parseFloat(parts[1]);const price=parseFloat(parts[2]);if(date&&!isNaN(qty)&&!isNaN(price)){entries[date]={qty,price,saved:Date.now()};count++}}});
+    saveEntries(entries);renderToday();toast(`✓ Imported ${count} entries`);
+  };reader.readAsText(file);e.target.value='';
+}
+function clearAllData(){if(!confirm('Delete ALL data? This cannot be undone.'))return;localStorage.removeItem(STORE_KEY);renderToday();toast('🗑 All data cleared')}
+setTodayDate();loadSettings();renderToday();renderCalendar();
+</script>
+</body>
+</html>
