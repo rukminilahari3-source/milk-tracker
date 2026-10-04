@@ -122,11 +122,13 @@
   </div>
   <div class="card">
     <div class="card-title">🥛 Log Entry</div>
+    <div class="form-group"><label>User</label><select id="entryUser"></select></div>
     <div class="form-group"><label>Date</label><input type="date" id="entryDate"></div>
     <div class="input-row">
-      <div class="form-group"><label>Quantity (L)</label><input type="number" id="entryQty" placeholder="e.g. 1.5" step="0.1" min="0"></div>
-      <div class="form-group"><label>Price / Litre (₹)</label><input type="number" id="entryPrice" placeholder="e.g. 60" step="0.5" min="0"></div>
+      <div class="form-group"><label>Morning (L)</label><input type="number" id="morningQty" placeholder="e.g. 1.5" step="0.1" min="0"></div>
+      <div class="form-group"><label>Evening (L)</label><input type="number" id="eveningQty" placeholder="e.g. 1.0" step="0.1" min="0"></div>
     </div>
+    <div class="form-group"><label>Price / Litre (₹)</label><input type="number" id="entryPrice" placeholder="e.g. 60" step="0.5" min="0"></div>
     <button class="btn btn-primary" onclick="saveEntry()">✓ Save Entry</button>
   </div>
   <div class="card"><div class="card-title">📋 Recent Entries</div><div id="recentList"></div></div>
@@ -185,6 +187,17 @@
         <option>Full Cream</option><option>Skimmed</option><option>Other</option>
       </select>
     </div>
+    <div class="setting-row" style="margin-top:16px;display:block">
+      <div><div class="setting-label">Active User</div><div class="setting-sub">Choose whose milk entries are shown</div></div>
+      <select id="activeUser" style="margin-top:8px"></select>
+    </div>
+    <div class="setting-row" style="display:block;margin-top:12px">
+      <div><div class="setting-label">Add User</div><div class="setting-sub">Create a new household member</div></div>
+      <div class="input-row" style="margin-top:8px">
+        <input type="text" id="newUserName" placeholder="Enter name" style="flex:1">
+        <button class="btn btn-primary" onclick="addUser()" style="padding:10px 14px;margin-left:8px">Add</button>
+      </div>
+    </div>
   </div>
   <div class="card">
     <div class="card-title">💾 Data Management</div>
@@ -193,6 +206,7 @@
     <input type="file" id="importFile" accept=".csv" style="display:none" onchange="handleImport(event)">
     <div style="height:12px"></div>
     <button class="btn btn-danger" style="width:100%" onclick="clearAllData()">🗑 Clear All Data</button>
+    <button class="btn btn-outline" style="width:100%;margin-top:10px" onclick="logoutUser()">Log Out</button>
   </div>
   <div class="card">
     <div class="card-title">📱 Install as App</div>
@@ -203,7 +217,7 @@
     </p>
   </div>
   <div class="card" style="text-align:center">
-    <p style="font-size:12px;color:var(--muted)">Milk Tracker v1.0 · All data stored locally on your device</p>
+    <p style="font-size:12px;color:var(--muted)">Milk Tracker v1.0 · Data synced with your MilkLog server</p>
   </div>
 </div>
 
@@ -216,13 +230,69 @@
 </div>
 
 <script>
-const STORE_KEY='milktracker_entries';const PREF_KEY='milktracker_prefs';
-function loadEntries(){try{return JSON.parse(localStorage.getItem(STORE_KEY)||'{}')}catch{return{}}}
-function saveEntries(d){localStorage.setItem(STORE_KEY,JSON.stringify(d))}
-function loadPrefs(){try{return JSON.parse(localStorage.getItem(PREF_KEY)||'{}')}catch{return{}}}
-function savePrefs(p){localStorage.setItem(PREF_KEY,JSON.stringify(p))}
+const API=location.protocol==='file:'?'http://localhost:5000/api':'/api';
+const CACHE_KEY='milklog_cache';let ENTRIES={},PREFS={},USERS=[];
 let currentCalMonth=new Date();let currentSumMonth=new Date();
 currentCalMonth.setDate(1);currentSumMonth.setDate(1);
+
+async function api(path,opts={}){
+  const r=await fetch(API+path,{credentials:'include',headers:{'Content-Type':'application/json'},...opts});
+  if(!r.ok)throw new Error((await r.json().catch(()=>({}))).error||'Server error');
+  return r.status===204?null:r.json();
+}
+
+async function checkAuth(){
+  try {
+    const me = await api('/me');
+    const name = me && me.username ? me.username : 'Default';
+    const authScreen = document.getElementById('cover-page');
+    if (authScreen) authScreen.style.display = 'none';
+    localStorage.setItem('milklog_current_user', name);
+    return true;
+  } catch (error) {
+    const authScreen = document.getElementById('cover-page');
+    if (authScreen) authScreen.style.display = 'flex';
+    return false;
+  }
+}
+
+async function submitAuth(mode){
+  const username = document.getElementById('authUsername').value.trim();
+  const password = document.getElementById('authPassword').value;
+  if (!username || !password) {
+    toast('⚠️ Enter username and password');
+    return;
+  }
+
+  try {
+    const endpoint = mode === 'register' ? '/register' : '/login';
+    const result = await api(endpoint, {
+      method: 'POST',
+      body: JSON.stringify({ username, password })
+    });
+    localStorage.setItem('milklog_current_user', result.username || username);
+    dismissCover();
+    await init();
+  } catch (error) {
+    toast('⚠️ ' + error.message);
+  }
+}
+
+async function logoutUser(){
+  try {
+    await api('/logout', { method: 'POST' });
+    localStorage.removeItem('milklog_current_user');
+    document.getElementById('cover-page').style.display = 'flex';
+    document.getElementById('authPassword').value = '';
+    toast('Logged out');
+  } catch (error) {
+    toast('⚠️ ' + error.message);
+  }
+}
+function loadEntries(){return ENTRIES}
+function loadPrefs(){return PREFS}
+function cache(){localStorage.setItem(CACHE_KEY,JSON.stringify({ENTRIES,PREFS,USERS}))}
+function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2500)}
 function switchTab(id){
   document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
@@ -233,29 +303,106 @@ function switchTab(id){
   document.getElementById('nav-'+id).classList.add('active');
   if(id==='calendar')renderCalendar();if(id==='monthly')renderMonthly();
 }
-function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2500)}
 function setTodayDate(){document.getElementById('entryDate').value=new Date().toISOString().split('T')[0]}
-function getDefaultPrice(){const p=loadPrefs();return parseFloat(document.getElementById('defaultPrice')?.value||p.defaultPrice||60)}
-function saveEntry(){
+
+function getSelectedUser(){
+  const select=document.getElementById('entryUser');
+  const active=document.getElementById('activeUser');
+  const chosen=(select?select.value:localStorage.getItem('milklog_active_user')) || (active?active.value:'Default');
+  localStorage.setItem('milklog_active_user', chosen);
+  return chosen;
+}
+
+async function refresh(){
+  const rows=await api('/entries');
+  ENTRIES=Object.fromEntries(rows.map(e=>[`$${e.userId}::${e.date}`,(e)]));
+  cache();
+}
+
+async function reloadUsers(){
+  try{
+    USERS=await api('/users');
+  }catch(e){
+    USERS=(JSON.parse(localStorage.getItem('milklog_users')||'[]')).length ? JSON.parse(localStorage.getItem('milklog_users')||'[]') : ['Default'];
+  }
+  if(USERS.length===0)USERS=['Default'];
+  localStorage.setItem('milklog_users', JSON.stringify(USERS));
+
+  const entrySelect=document.getElementById('entryUser');
+  const activeSelect=document.getElementById('activeUser');
+  const options=USERS.map(u=>`<option value="${u}">${u}</option>`).join('');
+  if(entrySelect)entrySelect.innerHTML=options;
+  if(activeSelect)activeSelect.innerHTML=options;
+
+  const preferred=localStorage.getItem('milklog_active_user')||USERS[0];
+  const selected=USERS.includes(preferred)?preferred:USERS[0];
+  if(entrySelect)entrySelect.value=selected;
+  if(activeSelect)activeSelect.value=selected;
+  localStorage.setItem('milklog_active_user', selected);
+}
+
+function savePref(k,v){PREFS[k]=v;cache();api('/prefs',{method:'PUT',body:JSON.stringify({[k]:v})}).catch(e=>toast('⚠️ '+e.message));}
+
+async function addUser(){
+  const input=document.getElementById('newUserName');
+  const name=(input.value||'').trim();
+  if(!name){toast('⚠️ Enter a user name');return}
+  try{
+    const user=await api('/users',{method:'POST',body:JSON.stringify({name})});
+    USERS.push(user.name);
+    localStorage.setItem('milklog_users', JSON.stringify(USERS));
+    await reloadUsers();
+    document.getElementById('entryUser').value=user.name;
+    document.getElementById('activeUser').value=user.name;
+    localStorage.setItem('milklog_active_user', user.name);
+    input.value='';
+    toast('✓ User added');
+  }catch(e){toast('⚠️ '+e.message)}}
+
+function getUserEntries(){
+  const user=getSelectedUser();
+  const grouped={};
+  Object.values(ENTRIES).forEach(entry=>{
+    if(entry && entry.userId===user){
+      grouped[entry.date]=entry;
+    }
+  });
+  return grouped;
+}
+
+function getEntryKey(user,date){return `${user}::${date}`;}
+
+async function saveEntry(){
   const date=document.getElementById('entryDate').value;
-  const qty=parseFloat(document.getElementById('entryQty').value);
+  const user=getSelectedUser();
+  const morningQty=parseFloat(document.getElementById('morningQty').value)||0;
+  const eveningQty=parseFloat(document.getElementById('eveningQty').value)||0;
   const price=parseFloat(document.getElementById('entryPrice').value)||getDefaultPrice();
   if(!date){toast('⚠️ Please select a date');return}
-  if(!qty||qty<=0){toast('⚠️ Enter a valid quantity');return}
-  const entries=loadEntries();entries[date]={qty,price,saved:Date.now()};saveEntries(entries);
-  document.getElementById('entryQty').value='';
-  toast('✓ Entry saved!');renderToday();
+  if((morningQty+eveningQty)<=0){toast('⚠️ Enter a valid quantity');return}
+  try{
+    const entry=await api('/entries/'+date+'?user='+encodeURIComponent(user),{method:'PUT',body:JSON.stringify({morningQty,eveningQty,price,user})});
+    ENTRIES[getEntryKey(entry.userId,entry.date)] = entry;
+    cache();
+    document.getElementById('morningQty').value='';
+    document.getElementById('eveningQty').value='';
+    toast('✓ Entry saved!');renderToday();renderCalendar();renderMonthly();
+  }catch(e){toast('⚠️ '+e.message)}
 }
-function deleteEntry(date){
+
+async function deleteEntry(date,userName=getSelectedUser()){
   if(!confirm('Delete entry for '+date+'?'))return;
-  const entries=loadEntries();delete entries[date];saveEntries(entries);
-  renderToday();renderCalendar();toast('🗑 Entry deleted');
+  try{await api('/entries/'+date+'?user='+encodeURIComponent(userName),{method:'DELETE'});delete ENTRIES[getEntryKey(userName,date)];cache();renderToday();renderCalendar();renderMonthly();toast('🗑 Entry deleted')}
+  catch(e){toast('⚠️ '+e.message)}
 }
+
 function renderToday(){
-  const entries=loadEntries();
+  const user=getSelectedUser();
+  const entries=getUserEntries();
   const today=new Date().toISOString().split('T')[0];
   const now=new Date();const ym=now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');
-  const te=entries[today];document.getElementById('todayQty').textContent=te?te.qty+'L':'—';
+  const te=entries[today];
+  document.getElementById('todayQty').textContent=te?te.qty+'L':'—';
   let mTotal=0,mCost=0,mDays=0;
   Object.keys(entries).forEach(d=>{if(d.startsWith(ym)){mTotal+=entries[d].qty;mCost+=entries[d].qty*entries[d].price;mDays++}});
   document.getElementById('monthTotal').textContent=mTotal>0?mTotal.toFixed(1):'—';
@@ -263,18 +410,20 @@ function renderToday(){
   document.getElementById('entryCount').textContent=mDays||'—';
   const sorted=Object.keys(entries).sort((a,b)=>b.localeCompare(a)).slice(0,7);
   const list=document.getElementById('recentList');
-  if(sorted.length===0){list.innerHTML='<div class="empty-state"><div class="icon">🥛</div><p>No entries yet. Log your first!</p></div>';return}
+  if(sorted.length===0){list.innerHTML='<div class="empty-state"><div class="icon">🥛</div><p>No entries yet for '+user+'.</p></div>';return}
   list.innerHTML=sorted.map(d=>{
     const e=entries[d];const cost=(e.qty*e.price).toFixed(0);
     const dateObj=new Date(d+'T00:00:00');
     const label=d===today?'Today':dateObj.toLocaleDateString('en-IN',{weekday:'short',day:'numeric',month:'short'});
-    return`<div class="entry-item"><div class="entry-dot">🥛</div><div class="entry-info"><div class="entry-date">${label}</div><div class="entry-qty">${e.qty} L <span style="font-size:12px;color:var(--muted);font-family:DM Sans">@ ₹${e.price}/L</span></div><div class="entry-cost">₹${cost} total</div></div><div class="entry-actions"><button class="icon-btn" onclick="deleteEntry('${d}')">🗑</button></div></div>`;
+    return`<div class="entry-item"><div class="entry-dot">🥛</div><div class="entry-info"><div class="entry-date">${label}</div><div class="entry-qty">${e.qty} L <span style="font-size:12px;color:var(--muted);font-family:DM Sans">(${e.morningQty}M + ${e.eveningQty}E) @ ₹${e.price}/L</span></div><div class="entry-cost">₹${cost} total</div></div><div class="entry-actions"><button class="icon-btn" onclick="deleteEntry('${d}','${user}')">🗑</button></div></div>`;
   }).join('');
 }
 const DAYS=['Su','Mo','Tu','We','Th','Fr','Sa'];
 const MONTHS=['January','February','March','April','May','June','July','August','September','October','November','December'];
 function renderCalendar(){
-  const entries=loadEntries();const y=currentCalMonth.getFullYear();const m=currentCalMonth.getMonth();
+  const user=getSelectedUser();
+  const entries=getUserEntries();
+  const y=currentCalMonth.getFullYear();const m=currentCalMonth.getMonth();
   const ym=y+'-'+String(m+1).padStart(2,'0');const firstDay=new Date(y,m,1).getDay();
   const daysInM=new Date(y,m+1,0).getDate();const todayStr=new Date().toISOString().split('T')[0];
   document.getElementById('calMonthLabel').textContent=MONTHS[m]+' '+y;
@@ -283,25 +432,27 @@ function renderCalendar(){
   for(let i=0;i<firstDay;i++)html+=`<div class="cal-day empty"></div>`;
   for(let d=1;d<=daysInM;d++){
     const ds=ym+'-'+String(d).padStart(2,'0');const e=entries[ds];const isToday=ds===todayStr;
-    html+=`<div class="cal-day ${e?'has-entry':''} ${isToday?'today':''}" onclick="showCalDay('${ds}')"><span class="cal-day-num">${d}</span>${e?`<span class="cal-day-qty">${e.qty}L</span>`:''}</div>`;
+    html+=`<div class="cal-day ${e?'has-entry':''} ${isToday?'today':''}" onclick="showCalDay('${ds}','${user}')"><span class="cal-day-num">${d}</span>${e?`<span class="cal-day-qty">${e.qty}L</span>`:''}</div>`;
   }
   document.getElementById('calGrid').innerHTML=html;
 }
-function showCalDay(ds){
-  const entries=loadEntries();const e=entries[ds];
+function showCalDay(ds,user){
+  const entries=getUserEntries();const e=entries[ds];
   const detail=document.getElementById('calDayDetail');const content=document.getElementById('calDetailContent');
   const dateObj=new Date(ds+'T00:00:00');
   const label=dateObj.toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
   detail.style.display='block';
-  if(e){content.innerHTML=`<div style="display:flex;gap:16px;align-items:center"><div style="font-size:40px">🥛</div><div><div style="font-size:13px;color:var(--muted)">${label}</div><div style="font-family:'Playfair Display',serif;font-size:22px;font-weight:700">${e.qty} Litres</div><div style="font-size:13px;color:var(--accent3)">₹${(e.qty*e.price).toFixed(0)} total · ₹${e.price}/L</div></div></div><button class="btn btn-danger" style="margin-top:14px" onclick="deleteEntry('${ds}');document.getElementById('calDayDetail').style.display='none';renderCalendar()">🗑 Delete Entry</button>`}
+  if(e){content.innerHTML=`<div style="display:flex;gap:16px;align-items:center"><div style="font-size:40px">🥛</div><div><div style="font-size:13px;color:var(--muted)">${label}</div><div style="font-family:'Playfair Display',serif;font-size:22px;font-weight:700">${e.qty} Litres</div><div style="font-size:13px;color:var(--accent3)">Morning ${e.morningQty}L · Evening ${e.eveningQty}L · ₹${(e.qty*e.price).toFixed(0)} total</div></div></div><button class="btn btn-danger" style="margin-top:14px" onclick="deleteEntry('${ds}','${user}');document.getElementById('calDayDetail').style.display='none';renderCalendar()">🗑 Delete Entry</button>`}
   else{content.innerHTML=`<div style="text-align:center;padding:12px 0;color:var(--muted)"><div style="font-size:13px">${label}</div><div style="margin:8px 0;font-size:30px;opacity:.4">🥛</div><div style="font-size:14px">No entry for this day.</div><button class="btn btn-primary btn-sm" style="margin-top:12px;width:auto;padding:8px 20px" onclick="prefillDate('${ds}')">+ Add Entry</button></div>`}
   detail.scrollIntoView({behavior:'smooth',block:'nearest'});
 }
-function prefillDate(ds){switchTab('today');document.getElementById('entryDate').value=ds;document.getElementById('entryQty').focus()}
+function prefillDate(ds){switchTab('today');document.getElementById('entryDate').value=ds;document.getElementById('morningQty').focus()}
 function calPrev(){currentCalMonth.setMonth(currentCalMonth.getMonth()-1);renderCalendar()}
 function calNext(){currentCalMonth.setMonth(currentCalMonth.getMonth()+1);renderCalendar()}
 function renderMonthly(){
-  const entries=loadEntries();const y=currentSumMonth.getFullYear();const m=currentSumMonth.getMonth();
+  const user=getSelectedUser();
+  const entries=getUserEntries();
+  const y=currentSumMonth.getFullYear();const m=currentSumMonth.getMonth();
   const ym=y+'-'+String(m+1).padStart(2,'0');
   document.getElementById('summaryMonthLabel').textContent=MONTHS[m]+' '+y;
   const mEntries={};let total=0,cost=0;
@@ -315,37 +466,70 @@ function renderMonthly(){
   const maxW=Math.max(...weeks,1);
   document.getElementById('weeklyChart').innerHTML=weeks.map((v,i)=>`<div class="bar-wrap"><div class="bar" style="height:${Math.round((v/maxW)*100)}%;min-height:${v>0?'4px':'0'}"></div><div class="bar-label">W${i+1}</div></div>`).join('');
   const list=document.getElementById('monthlyList');
-  if(days===0){list.innerHTML='<div class="empty-state"><div class="icon">📭</div><p>No entries for this month.</p></div>'}
-  else{list.innerHTML=`<table class="summary-table"><thead><tr><th>Date</th><th>Qty (L)</th><th>Rate</th><th>Amount</th></tr></thead><tbody>`+Object.keys(mEntries).sort((a,b)=>a.localeCompare(b)).map(d=>{const e=mEntries[d];const dateObj=new Date(d+'T00:00:00');const label=dateObj.toLocaleDateString('en-IN',{day:'numeric',month:'short'});return`<tr><td class="td-bold">${label}</td><td class="td-accent">${e.qty}</td><td style="color:var(--muted);font-size:13px">₹${e.price}</td><td class="td-green">₹${(e.qty*e.price).toFixed(0)}</td></tr>`}).join('')+`<tr style="border-top:2px solid var(--border)"><td class="td-bold">Total</td><td class="td-accent">${total.toFixed(2)}</td><td></td><td class="td-green">₹${Math.round(cost)}</td></tr></tbody></table>`}
+  if(days===0){list.innerHTML='<div class="empty-state"><div class="icon">📭</div><p>No entries for this month for '+user+'.</p></div>'}
+  else{list.innerHTML=`<table class="summary-table"><thead><tr><th>Date</th><th>Qty (L)</th><th>Morning/Evening</th><th>Amount</th></tr></thead><tbody>`+Object.keys(mEntries).sort((a,b)=>a.localeCompare(b)).map(d=>{const e=mEntries[d];const dateObj=new Date(d+'T00:00:00');const label=dateObj.toLocaleDateString('en-IN',{day:'numeric',month:'short'});return`<tr><td class="td-bold">${label}</td><td class="td-accent">${e.qty}</td><td style="color:var(--muted);font-size:12px">${e.morningQty} / ${e.eveningQty}</td><td class="td-green">₹${(e.qty*e.price).toFixed(0)}</td></tr>`}).join('')+`<tr style="border-top:2px solid var(--border)"><td class="td-bold">Total</td><td class="td-accent">${total.toFixed(2)}</td><td></td><td class="td-green">₹${Math.round(cost)}</td></tr></tbody></table>`}
   const yearMonths={};Object.keys(entries).forEach(d=>{const ym2=d.substring(0,7);if(!yearMonths[ym2])yearMonths[ym2]={qty:0,cost:0};yearMonths[ym2].qty+=entries[d].qty;yearMonths[ym2].cost+=entries[d].qty*entries[d].price});
   const yearKeys=Object.keys(yearMonths).filter(k=>k.startsWith(y+'')).sort();
-  document.getElementById('yearSummary').innerHTML=yearKeys.length===0?`<div class="empty-state"><div class="icon">📭</div><p>No data for ${y}.</p></div>`:`<table class="summary-table"><thead><tr><th>Month</th><th>Total (L)</th><th>Cost</th></tr></thead><tbody>`+yearKeys.map(k=>{const[yr,mo]=k.split('-');return`<tr><td class="td-bold">${MONTHS[parseInt(mo)-1].substring(0,3)} ${yr}</td><td class="td-accent">${yearMonths[k].qty.toFixed(2)}</td><td class="td-green">₹${Math.round(yearMonths[k].cost)}</td></tr>`}).join('')+`</tbody></table>`;
+  document.getElementById('yearSummary').innerHTML=yearKeys.length===0?`<div class="empty-state"><div class="icon">📭</div><p>No data for ${y} for ${user}.</p></div>`:`<table class="summary-table"><thead><tr><th>Month</th><th>Total (L)</th><th>Cost</th></tr></thead><tbody>`+yearKeys.map(k=>{const[yr,mo]=k.split('-');return`<tr><td class="td-bold">${MONTHS[parseInt(mo)-1].substring(0,3)} ${yr}</td><td class="td-accent">${yearMonths[k].qty.toFixed(2)}</td><td class="td-green">₹${Math.round(yearMonths[k].cost)}</td></tr>`}).join('')+`</tbody></table>`;
 }
 function summaryPrev(){currentSumMonth.setMonth(currentSumMonth.getMonth()-1);renderMonthly()}
 function summaryNext(){currentSumMonth.setMonth(currentSumMonth.getMonth()+1);renderMonthly()}
 function loadSettings(){const p=loadPrefs();if(p.defaultPrice)document.getElementById('defaultPrice').value=p.defaultPrice;if(p.milkType)document.getElementById('milkType').value=p.milkType}
-document.getElementById('defaultPrice').addEventListener('change',function(){const p=loadPrefs();p.defaultPrice=this.value;savePrefs(p)});
-document.getElementById('milkType').addEventListener('change',function(){const p=loadPrefs();p.milkType=this.value;savePrefs(p)});
+document.getElementById('defaultPrice').addEventListener('change',function(){savePref('defaultPrice',this.value)});
+document.getElementById('milkType').addEventListener('change',function(){savePref('milkType',this.value)});
+document.getElementById('activeUser').addEventListener('change',function(){localStorage.setItem('milklog_active_user', this.value); const entrySelect=document.getElementById('entryUser'); if(entrySelect)entrySelect.value=this.value; renderToday(); renderCalendar(); renderMonthly();});
+document.getElementById('entryUser').addEventListener('change',function(){localStorage.setItem('milklog_active_user', this.value); const activeSelect=document.getElementById('activeUser'); if(activeSelect)activeSelect.value=this.value; renderToday(); renderCalendar(); renderMonthly();});
+function getDefaultPrice(){const p=loadPrefs();return parseFloat(document.getElementById('defaultPrice')?.value||p.defaultPrice||60)}
 function exportData(){
-  const entries=loadEntries();const keys=Object.keys(entries).sort();
+  const user=getSelectedUser();
+  const entries=getUserEntries();
+  const keys=Object.keys(entries).sort();
   if(keys.length===0){toast('⚠️ No data to export');return}
   let csv='Date,Quantity (L),Price per L,Total Cost\n';
   keys.forEach(d=>{const e=entries[d];csv+=`${d},${e.qty},${e.price},${(e.qty*e.price).toFixed(2)}\n`});
   const blob=new Blob([csv],{type:'text/csv'});const url=URL.createObjectURL(blob);
-  const a=document.createElement('a');a.href=url;a.download='milk-tracker-'+new Date().toISOString().split('T')[0]+'.csv';a.click();URL.revokeObjectURL(url);
+  const a=document.createElement('a');a.href=url;a.download='milk-tracker-'+user+'-'+new Date().toISOString().split('T')[0]+'.csv';a.click();URL.revokeObjectURL(url);
   toast('⬇ Exported!');
 }
 function importData(){document.getElementById('importFile').click()}
 function handleImport(e){
   const file=e.target.files[0];if(!file)return;
-  const reader=new FileReader();reader.onload=function(ev){
-    const lines=ev.target.result.trim().split('\n').slice(1);const entries=loadEntries();let count=0;
-    lines.forEach(line=>{const parts=line.split(',');if(parts.length>=3){const date=parts[0].trim();const qty=parseFloat(parts[1]);const price=parseFloat(parts[2]);if(date&&!isNaN(qty)&&!isNaN(price)){entries[date]={qty,price,saved:Date.now()};count++}}});
-    saveEntries(entries);renderToday();toast(`✓ Imported ${count} entries`);
+  const reader=new FileReader();reader.onload=async function(ev){
+    const items=ev.target.result.trim().split('\n').slice(1).map(l=>l.split(',')).filter(p=>p.length>=3&&p[0].trim()&&!isNaN(parseFloat(p[1]))&&!isNaN(parseFloat(p[2]))).map(p=>({date:p[0].trim(),user:getSelectedUser(),qty:parseFloat(p[1]),price:parseFloat(p[2])}));
+    try{await api('/entries/bulk',{method:'POST',body:JSON.stringify({entries:items})});await refresh();renderToday();renderCalendar();renderMonthly();toast(`✓ Imported ${items.length} entries`)}
+    catch(err){toast('⚠️ Import failed: '+err.message)}
   };reader.readAsText(file);e.target.value='';
 }
-function clearAllData(){if(!confirm('Delete ALL data? This cannot be undone.'))return;localStorage.removeItem(STORE_KEY);renderToday();toast('🗑 All data cleared')}
-setTodayDate();loadSettings();renderToday();renderCalendar();
+async function clearAllData(){
+  if(!confirm('Delete ALL data? This cannot be undone.'))return;
+  try{await api('/entries',{method:'DELETE'});ENTRIES={};cache();renderToday();renderCalendar();renderMonthly();toast('🗑 All data cleared')}
+  catch(e){toast('⚠️ '+e.message)}
+}
+async function init(){
+  const authed = await checkAuth();
+  if (!authed) {
+    return;
+  }
+  setTodayDate();
+  try{
+    await reloadUsers();
+    await refresh();
+    PREFS=await api('/prefs');
+    const old=JSON.parse(localStorage.getItem('milktracker_entries')||'{}');
+    if(!localStorage.getItem('milklog_migrated')&&Object.keys(old).length&&!Object.keys(ENTRIES).length){
+      await api('/entries/bulk',{method:'POST',body:JSON.stringify({entries:Object.entries(old).map(([date,e])=>({date,user:getSelectedUser(),qty:e.qty,price:e.price}))})});
+      await refresh();toast('✓ Local data uploaded to server');
+    }
+    localStorage.setItem('milklog_migrated','1');cache();
+  }catch(e){
+    const c=JSON.parse(localStorage.getItem(CACHE_KEY)||'{}');ENTRIES=c.ENTRIES||{};PREFS=c.PREFS||{};USERS=(c.USERS||['Default']);
+    if(!USERS.length)USERS=['Default'];
+    await reloadUsers();
+    toast('⚠️ Server unreachable — showing saved copy');
+  }
+  loadSettings();renderToday();renderCalendar();renderMonthly();
+}
+init();
 </script>
 
 <!-- ═══════════════════════════════════════════════
@@ -561,7 +745,7 @@ setTodayDate();loadSettings();renderToday();renderCalendar();
   }
 </style>
 
-<div id="cover-page" onclick="dismissCover()">
+<div id="cover-page">
   <div class="cover-grain"></div>
 
   <div class="cover-rings">
@@ -576,11 +760,13 @@ setTodayDate();loadSettings();renderToday();renderCalendar();
 
   <div class="cover-divider"></div>
 
-  <div class="cover-tagline">Track your daily milk, monitor costs &amp; stay on top of your consumption.</div>
+  <div class="cover-tagline" style="margin-bottom:16px;max-width:260px;">Sign in to access your milk data.</div>
 
-  <div class="cover-cta">
-    <button class="cover-btn" onclick="event.stopPropagation();dismissCover()">Get Started</button>
-    <div class="cover-tap-hint">Tap anywhere to continue</div>
+  <div style="position:relative;z-index:1;width:min(300px,82vw);display:flex;flex-direction:column;gap:12px;">
+    <input id="authUsername" type="text" placeholder="Username" style="width:100%;background:rgba(19,40,71,0.96);border:1px solid rgba(91,200,245,0.35);border-radius:12px;color:#fff;padding:14px 16px;font-size:15px;outline:none;" />
+    <input id="authPassword" type="password" placeholder="Password" style="width:100%;background:rgba(19,40,71,0.96);border:1px solid rgba(91,200,245,0.35);border-radius:12px;color:#fff;padding:14px 16px;font-size:15px;outline:none;" />
+    <button class="cover-btn" type="button" onclick="submitAuth('login')" style="width:100%;margin-top:8px;">Login</button>
+    <button class="btn btn-outline" type="button" onclick="submitAuth('register')" style="width:100%;border-radius:12px;padding:12px 14px;background:rgba(91,200,245,0.06);margin-top:0;">Create Account</button>
   </div>
 
   <div class="cover-version">MilkLog &nbsp;·&nbsp; v1.0</div>
@@ -589,8 +775,12 @@ setTodayDate();loadSettings();renderToday();renderCalendar();
 <script>
   function dismissCover() {
     const cover = document.getElementById('cover-page');
+    if (!cover) return;
     cover.classList.add('exiting');
-    cover.addEventListener('animationend', () => cover.remove(), { once: true });
+    cover.addEventListener('animationend', () => {
+      cover.style.display = 'none';
+      cover.classList.remove('exiting');
+    }, { once: true });
   }
 </script>
 </body>
