@@ -8,10 +8,10 @@
 
 ## Overview
 
-MilkLog tracks daily milk consumption and calculates costs. The frontend is a single HTML file; data is stored in a SQLite database through a Flask REST API, so it is shared across every device that connects to the server.
+MilkLog tracks daily milk consumption and calculates costs. The frontend is a single HTML file; data is stored through a Flask REST API in SQLite for local development or PostgreSQL when `DATABASE_URL` is configured.
 
 ```
-Browser (index.html)  ──fetch/JSON──▶  Flask API (app.py)  ──▶  milklog.db (SQLite)
+Browser (index.html)  ──fetch/JSON──▶  Flask API (app.py)  ──▶  SQLite (local) or PostgreSQL (hosted)
 ```
 
 ---
@@ -25,9 +25,23 @@ python app.py
 
 Open **http://localhost:5000**. Flask serves `index.html` itself, and `milklog.db` is created automatically on first run.
 
-Create the first account from the app's register screen. No default login credentials are shipped with the app. If you want a pre-created administrative account on the first run, set `MILKLOG_ADMIN_USERNAME` and `MILKLOG_ADMIN_PASSWORD` before starting the server. Set `SECRET_KEY` to a long random value to keep sessions valid across server restarts.
+The current Flask API does not implement login or access control. Do not deploy it with private data until authentication is added; restricting CORS does not stop direct API requests.
 
 To use it on a phone, connect to the same Wi-Fi and open `http://<your-computer-IP>:5000`.
+
+## Deploying with GitHub Pages and Render
+
+GitHub Pages serves the frontend only; it cannot run the Flask API. This repository includes a Render Blueprint (`render.yaml`) for deploying the API on Render's free web-service plan. Free web services do not have persistent disks, so use an external PostgreSQL provider for records that must survive service restarts.
+
+**Privacy warning:** the current API has no authentication, so anyone who knows its public URL can read, change, or delete entries. The CORS allowlist only controls which browser origins can read responses; it is not access control. Do not use this public deployment for private household data until authentication is implemented.
+
+1. Create a PostgreSQL database with a provider that offers a free plan, and copy its connection string. Free database plans have provider-specific storage, inactivity, and retention limits; check those before relying on the database as your only backup.
+2. Push the repository to GitHub and create or update a Blueprint in Render using this repository and its `render.yaml`. Pushing to GitHub Pages alone does not deploy the API. When prompted, set `DATABASE_URL` to the PostgreSQL connection string. Do not commit that string to GitHub.
+3. The frontend uses `https://milklog-rukminilahari3-api.onrender.com/api` on the GitHub Pages origin. If Render assigns a different service URL, update the `API` constant near the top of the script in `index.html` and push the change.
+4. In the GitHub repository, enable Pages for the branch and folder that contain `index.html` (for example, the root of the `main` branch). The Render Blueprint limits browser API access to `https://rukminilahari3-source.github.io`.
+5. Verify `https://milklog-rukminilahari3-api.onrender.com/api/health` returns `{"status":"ok"}`, then open the Pages URL and save a test entry.
+
+The Render free service may sleep while idle, so the first request can take longer. Its filesystem is ephemeral; the hosted app therefore requires `DATABASE_URL` and does not use its local SQLite file. Existing `milklog.db` data is not transferred automatically; export and import it separately if it needs to be retained.
 
 ---
 
@@ -93,20 +107,20 @@ curl -X POST localhost:5000/api/entries/bulk -H "Content-Type: application/json"
 | `date` | must be a real calendar date |
 | `prefs` keys | only `defaultPrice`, `milkType` |
 
-Data and preference endpoints require a signed-in session. Errors return JSON: `{"error": "message"}` with status 400 (invalid input), 401 (not signed in), 404 or 405.
+The current API does not require sign-in. Errors return JSON: `{"error": "message"}` with status 400 (invalid input), 404 or 405.
 
 ---
 
 ## Database
 
-SQLite file `milklog.db`, next to `app.py`.
+Local development uses the SQLite file `milklog.db`, next to `app.py`. Set `DATABASE_URL` to a PostgreSQL connection string to use PostgreSQL instead; the app creates its tables on startup.
 
 | Table | Columns |
 |---|---|
 | `entries` | `date` (PK), `qty`, `price`, `saved` |
 | `prefs` | `key` (PK), `value` |
 
-To back up your data, copy `milklog.db`.
+Back up the database using the tools provided by your database provider. For local SQLite, copy `milklog.db`.
 
 ---
 
@@ -141,8 +155,8 @@ Date,Quantity (L),Price per L,Total Cost
 
 ## Notes and Limitations
 
-- **Shared household data.** Authentication gates the app and its APIs; accounts on this installation can access the same household records.
+- **No API authentication.** Do not expose the API with private data; anyone who can reach its URL can access the records.
 - **Development server.** `app.py` runs with `debug=True`. For production, set `debug=False` and use a WSGI server such as `gunicorn app:app`.
 - **Development server.** `app.py` runs with `debug=True`. For production, set `debug=False` and use a WSGI server such as `gunicorn app:app`.
-- **Static hosting no longer works.** GitHub Pages and Netlify can't run Flask; the server must be running somewhere the app can reach.
+- **Static hosting requires a separate API host.** GitHub Pages cannot run Flask; configure the frontend to reach a Flask server such as the Render service described above.
 - **Opening `index.html` directly** (`file://`) works, but only while `app.py` is running on `localhost:5000`.

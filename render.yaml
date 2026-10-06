@@ -2,16 +2,12 @@ services:
   - type: web
     name: milklog-rukminilahari3-api
     runtime: python
-    plan: starter
+    plan: free
     buildCommand: pip install -r requirements.txt
     startCommand: gunicorn --bind 0.0.0.0:$PORT app:app
     healthCheckPath: /api/health
     envVars:
-      - key: MILKLOG_DB_PATH
-        value: /var/data/milklog.db
+      - key: DATABASE_URL
+        sync: false
       - key: MILKLOG_ALLOWED_ORIGINS
         value: https://rukminilahari3-source.github.io
-    disk:
-      name: milklog-data
-      mountPath: /var/data
-      sizeGB: 1

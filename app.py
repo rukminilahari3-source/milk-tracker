@@ -1,4 +1,4 @@
-"""MilkLog REST API — single-file Flask + SQLite backend.
+"""MilkLog REST API — Flask backend with SQLite or PostgreSQL storage.
 
 Run:   pip install -r requirements.txt && python app.py
 Open:  http://localhost:5000   (Flask also serves index.html)
@@ -13,16 +13,24 @@ Endpoints
   GET    /api/prefs
   PUT    /api/prefs                    {"defaultPrice": 60, "milkType": "Cow"}
 """
+import os
 import re
 import sqlite3
 import time
+from contextlib import closing
 from datetime import date as Date
 from pathlib import Path
 
 from flask import Flask, g, jsonify, request, send_from_directory
 
 BASE = Path(__file__).parent
-DB_PATH = BASE / "milklog.db"
+DB_PATH = Path(os.environ.get("MILKLOG_DB_PATH", BASE / "milklog.db"))
+DATABASE_URL = os.environ.get("DATABASE_URL", "").strip() or None
+CORS_ORIGINS = {
+    origin.strip()
+    for origin in os.environ.get("MILKLOG_ALLOWED_ORIGINS", "").split(",")
+    if origin.strip()
+}
 MONTH_RE = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
 PREF_KEYS = {"defaultPrice", "milkType"}
 
@@ -30,10 +38,30 @@ app = Flask(__name__, static_folder=None)
 
 
 # ---------- database ----------
+def _postgres_dsn():
+    if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
+        return "postgresql://" + DATABASE_URL[len("postgres://"):]
+    return DATABASE_URL
+
+
+def _connect_postgres():
+    import psycopg
+    from psycopg.rows import dict_row
+
+    return psycopg.connect(_postgres_dsn(), row_factory=dict_row)
+
+
+def _sql(query):
+    return query.replace("?", "%s") if DATABASE_URL else query
+
+
 def db():
     if "db" not in g:
-        g.db = sqlite3.connect(DB_PATH)
-        g.db.row_factory = sqlite3.Row
+        if DATABASE_URL:
+            g.db = _connect_postgres()
+        else:
+            g.db = sqlite3.connect(DB_PATH)
+            g.db.row_factory = sqlite3.Row
     return g.db
 
 
@@ -45,7 +73,25 @@ def close_db(_):
 
 
 def init_db():
-    with sqlite3.connect(DB_PATH) as conn:
+    if DATABASE_URL:
+        with _connect_postgres() as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS entries (
+                    date  TEXT PRIMARY KEY,
+                    qty   DOUBLE PRECISION NOT NULL CHECK (qty > 0),
+                    price DOUBLE PRECISION NOT NULL CHECK (price >= 0),
+                    saved BIGINT NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS prefs (key TEXT PRIMARY KEY, value TEXT)"
+            )
+        return
+
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with closing(sqlite3.connect(DB_PATH)) as conn:
         conn.executescript(
             """
             CREATE TABLE IF NOT EXISTS entries (
@@ -57,6 +103,9 @@ def init_db():
             CREATE TABLE IF NOT EXISTS prefs (key TEXT PRIMARY KEY, value TEXT);
             """
         )
+
+
+init_db()
 
 
 # ---------- helpers ----------
@@ -81,8 +130,13 @@ def bad_method(_):
 
 
 @app.after_request
-def cors(resp):  # lets the page work when opened from file:// or another origin
-    resp.headers["Access-Control-Allow-Origin"] = "*"
+def cors(resp):
+    origin = request.headers.get("Origin")
+    if not CORS_ORIGINS:
+        resp.headers["Access-Control-Allow-Origin"] = "*"
+    elif origin in CORS_ORIGINS:
+        resp.headers["Access-Control-Allow-Origin"] = origin
+        resp.headers.add("Vary", "Origin")
     resp.headers["Access-Control-Allow-Headers"] = "Content-Type"
     resp.headers["Access-Control-Allow-Methods"] = "GET, PUT, POST, DELETE, OPTIONS"
     return resp
@@ -111,14 +165,16 @@ def parse_entry(d, data):
 
 def upsert(d, qty, price):
     db().execute(
-        "INSERT INTO entries (date, qty, price, saved) VALUES (?,?,?,?) "
-        "ON CONFLICT(date) DO UPDATE SET qty=excluded.qty, price=excluded.price, saved=excluded.saved",
+        _sql(
+            "INSERT INTO entries (date, qty, price, saved) VALUES (?,?,?,?) "
+            "ON CONFLICT(date) DO UPDATE SET qty=excluded.qty, price=excluded.price, saved=excluded.saved"
+        ),
         (d, qty, price, int(time.time() * 1000)),
     )
 
 
 def get_entry(d):
-    return dict(db().execute("SELECT * FROM entries WHERE date=?", (d,)).fetchone())
+    return dict(db().execute(_sql("SELECT * FROM entries WHERE date=?"), (d,)).fetchone())
 
 
 # ---------- entries ----------
@@ -133,7 +189,7 @@ def list_entries():
     if month:
         if not MONTH_RE.match(month):
             raise ApiError("'month' must be YYYY-MM")
-        rows = db().execute("SELECT * FROM entries WHERE date LIKE ? ORDER BY date", (month + "-%",))
+        rows = db().execute(_sql("SELECT * FROM entries WHERE date LIKE ? ORDER BY date"), (month + "-%",))
     else:
         rows = db().execute("SELECT * FROM entries ORDER BY date")
     return jsonify([dict(r) for r in rows])
@@ -150,7 +206,7 @@ def put_entry(d):
 @app.delete("/api/entries/<d>")
 def delete_entry(d):
     valid_date(d)
-    cur = db().execute("DELETE FROM entries WHERE date=?", (d,))
+    cur = db().execute(_sql("DELETE FROM entries WHERE date=?"), (d,))
     db().commit()
     if not cur.rowcount:
         raise ApiError("No entry for that date", 404)
@@ -189,7 +245,13 @@ def put_prefs():
     if unknown:
         raise ApiError(f"Unknown preference(s): {', '.join(sorted(unknown))}")
     for k, v in data.items():
-        db().execute("INSERT OR REPLACE INTO prefs (key, value) VALUES (?,?)", (k, str(v)))
+        db().execute(
+            _sql(
+                "INSERT INTO prefs (key, value) VALUES (?,?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value"
+            ),
+            (k, str(v)),
+        )
     db().commit()
     return get_prefs()
 
@@ -201,5 +263,4 @@ def index():
 
 
 if __name__ == "__main__":
-    init_db()
     app.run(host="0.0.0.0", port=5000, debug=True)

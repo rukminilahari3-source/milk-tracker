@@ -216,7 +216,8 @@
 </div>
 
 <script>
-const API=location.protocol==='file:'?'http://localhost:5000/api':'/api';
+const API=location.protocol==='file:'?'http://localhost:5000/api':
+  location.hostname==='rukminilahari3-source.github.io'?'https://milklog-rukminilahari3-api.onrender.com/api':'/api';
 const CACHE_KEY='milklog_cache';let ENTRIES={},PREFS={};
 async function api(path,opts={}){
   const r=await fetch(API+path,{headers:{'Content-Type':'application/json'},...opts});
