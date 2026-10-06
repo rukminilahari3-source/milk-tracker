@@ -21,7 +21,7 @@ from contextlib import closing
 from datetime import date as Date
 from pathlib import Path
 
-from flask import Flask, g, jsonify, request, send_from_directory
+from flask import Flask, g, jsonify, request, send_from_directory, session
 
 BASE = Path(__file__).parent
 DB_PATH = Path(os.environ.get("MILKLOG_DB_PATH", BASE / "milklog.db"))
@@ -35,6 +35,7 @@ MONTH_RE = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
 PREF_KEYS = {"defaultPrice", "milkType"}
 
 app = Flask(__name__, static_folder=None)
+app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "milklog-dev-secret")
 
 
 # ---------- database ----------
@@ -78,12 +79,22 @@ def init_db():
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS entries (
-                    date  TEXT PRIMARY KEY,
-                    qty   DOUBLE PRECISION NOT NULL CHECK (qty > 0),
-                    price DOUBLE PRECISION NOT NULL CHECK (price >= 0),
-                    saved BIGINT NOT NULL
+                    date       TEXT NOT NULL,
+                    userId     TEXT NOT NULL DEFAULT '',
+                    qty        DOUBLE PRECISION NOT NULL CHECK (qty > 0),
+                    morningQty DOUBLE PRECISION DEFAULT 0,
+                    eveningQty DOUBLE PRECISION DEFAULT 0,
+                    price      DOUBLE PRECISION NOT NULL CHECK (price >= 0),
+                    saved      BIGINT NOT NULL,
+                    PRIMARY KEY (date, userId)
                 )
                 """
+            )
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS user_profiles (userId TEXT PRIMARY KEY, ownerUsername TEXT NOT NULL, createdAt BIGINT NOT NULL)"
+            )
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS users (username TEXT PRIMARY KEY, password TEXT NOT NULL)"
             )
             conn.execute(
                 "CREATE TABLE IF NOT EXISTS prefs (key TEXT PRIMARY KEY, value TEXT)"
@@ -95,10 +106,23 @@ def init_db():
         conn.executescript(
             """
             CREATE TABLE IF NOT EXISTS entries (
-                date  TEXT PRIMARY KEY,           -- YYYY-MM-DD
-                qty   REAL NOT NULL CHECK (qty > 0),
-                price REAL NOT NULL CHECK (price >= 0),
-                saved INTEGER NOT NULL            -- epoch ms
+                date        TEXT NOT NULL,
+                userId      TEXT NOT NULL DEFAULT '',
+                qty         REAL NOT NULL CHECK (qty > 0),
+                morningQty  REAL DEFAULT 0,
+                eveningQty  REAL DEFAULT 0,
+                price       REAL NOT NULL CHECK (price >= 0),
+                saved       INTEGER NOT NULL,
+                PRIMARY KEY (date, userId)
+            );
+            CREATE TABLE IF NOT EXISTS users (
+                username TEXT PRIMARY KEY,
+                password TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS user_profiles (
+                userId TEXT PRIMARY KEY,
+                ownerUsername TEXT NOT NULL,
+                createdAt INTEGER NOT NULL
             );
             CREATE TABLE IF NOT EXISTS prefs (key TEXT PRIMARY KEY, value TEXT);
             """
@@ -150,31 +174,61 @@ def valid_date(s):
 
 
 def parse_entry(d, data):
-    """Validate one entry payload and return a (date, qty, price) tuple."""
+    """Validate one entry payload and return a (date, userId, qty, morningQty, eveningQty, price) tuple."""
     valid_date(d)
-    try:
-        qty, price = float(data["qty"]), float(data["price"])
-    except (KeyError, TypeError, ValueError):
+    data = data or {}
+    qty_val = data.get("qty")
+    price_val = data.get("price")
+    morning = data.get("morningQty")
+    evening = data.get("eveningQty")
+
+    if morning is None and evening is None and qty_val is None:
         raise ApiError("'qty' and 'price' must be numbers")
+
+    try:
+        if morning is not None or evening is not None:
+            morning_qty = float(morning if morning is not None else 0)
+            evening_qty = float(evening if evening is not None else 0)
+            qty = morning_qty + evening_qty
+        else:
+            qty = float(qty_val)
+            morning_qty = qty
+            evening_qty = 0.0
+        price = float(price_val)
+    except (TypeError, ValueError):
+        raise ApiError("'qty' and 'price' must be numbers")
+
     if not 0 < qty <= 100:
         raise ApiError("'qty' must be between 0 and 100 litres")
     if not 0 <= price <= 10000:
         raise ApiError("'price' must be between 0 and 10000")
-    return d, qty, price
+    if morning_qty < 0 or evening_qty < 0:
+        raise ApiError("'morningQty' and 'eveningQty' must be non-negative")
+    return d, qty, morning_qty, evening_qty, price
 
 
-def upsert(d, qty, price):
+def chosen_user_id():
+    query_user = request.args.get("user")
+    payload = request.get_json(silent=True) or {}
+    user_id = (payload.get("userId") or query_user or session.get("username") or "").strip()
+    return user_id or "default"
+
+
+def upsert(d, qty, morning_qty, evening_qty, price, user_id):
     db().execute(
         _sql(
-            "INSERT INTO entries (date, qty, price, saved) VALUES (?,?,?,?) "
-            "ON CONFLICT(date) DO UPDATE SET qty=excluded.qty, price=excluded.price, saved=excluded.saved"
+            "INSERT INTO entries (date, userId, qty, morningQty, eveningQty, price, saved) VALUES (?,?,?,?,?,?,?) "
+            "ON CONFLICT(date, userId) DO UPDATE SET qty=excluded.qty, morningQty=excluded.morningQty, eveningQty=excluded.eveningQty, price=excluded.price, saved=excluded.saved"
         ),
-        (d, qty, price, int(time.time() * 1000)),
+        (d, user_id, qty, morning_qty, evening_qty, price, int(time.time() * 1000)),
     )
 
 
-def get_entry(d):
-    return dict(db().execute(_sql("SELECT * FROM entries WHERE date=?"), (d,)).fetchone())
+def get_entry(d, user_id=None):
+    if user_id is None:
+        user_id = chosen_user_id()
+    row = db().execute(_sql("SELECT * FROM entries WHERE date=? AND userId=?"), (d, user_id)).fetchone()
+    return dict(row) if row is not None else None
 
 
 # ---------- entries ----------
@@ -183,30 +237,130 @@ def health():
     return jsonify(status="ok")
 
 
+@app.post("/api/register")
+def register():
+    data = request.get_json(silent=True) or {}
+    username = (data.get("username") or "").strip()
+    password = data.get("password") or ""
+    if not username or not password:
+        raise ApiError("Username and password are required")
+    if db().execute(_sql("SELECT 1 FROM users WHERE username=?"), (username,)).fetchone():
+        raise ApiError("Username already exists", 409)
+    db().execute(_sql("INSERT INTO users (username, password) VALUES (?, ?)"), (username, password))
+    db().commit()
+    session["username"] = username
+    return jsonify({"username": username, "loggedIn": True}), 201
+
+
+@app.post("/api/login")
+def login():
+    data = request.get_json(silent=True) or {}
+    username = (data.get("username") or "").strip()
+    password = data.get("password") or ""
+    row = db().execute(_sql("SELECT * FROM users WHERE username=?"), (username,)).fetchone()
+    if row is None or row["password"] != password:
+        raise ApiError("Invalid username or password", 401)
+    session["username"] = username
+    return jsonify({"username": username, "loggedIn": True})
+
+
+@app.post("/api/logout")
+def logout():
+    session.pop("username", None)
+    return jsonify({"loggedOut": True})
+
+
+@app.get("/api/me")
+def me():
+    username = session.get("username")
+    if not username:
+        return jsonify(error="Authentication required"), 401
+    return jsonify({"username": username})
+
+
+@app.get("/api/users")
+def list_users():
+    username = session.get("username")
+    if not username:
+        return jsonify(error="Authentication required"), 401
+    rows = db().execute(
+        _sql("SELECT userId, ownerUsername FROM user_profiles WHERE ownerUsername=? ORDER BY userId"),
+        (username,),
+    ).fetchall()
+    return jsonify([{"id": row["userId"], "name": row["userId"], "owner": row["ownerUsername"]} for row in rows])
+
+
+@app.post("/api/users")
+def create_user():
+    username = session.get("username")
+    if not username:
+        return jsonify(error="Authentication required"), 401
+    data = request.get_json(silent=True) or {}
+    name = (data.get("name") or data.get("userId") or "").strip()
+    if not name:
+        raise ApiError("'name' is required")
+    if not db().execute(_sql("SELECT 1 FROM user_profiles WHERE userId=?"), (name,)).fetchone():
+        db().execute(
+            _sql("INSERT INTO user_profiles (userId, ownerUsername, createdAt) VALUES (?, ?, ?)"),
+            (name, username, int(time.time() * 1000)),
+        )
+    db().commit()
+    return jsonify({"id": name, "name": name, "owner": username}), 201
+
+
 @app.get("/api/entries")
 def list_entries():
+    user = request.args.get("user")
     month = request.args.get("month")
+
+    if "username" not in session and not user:
+        has_rows = db().execute("SELECT 1 FROM entries LIMIT 1").fetchone() is not None
+        if not has_rows:
+            return jsonify(error="Authentication required"), 401
+
+    if user:
+        query = _sql("SELECT * FROM entries WHERE userId=?")
+        params = (user,)
+    elif "username" in session:
+        owner = session["username"]
+        query = _sql(
+            "SELECT * FROM entries WHERE userId IN (SELECT userId FROM user_profiles WHERE ownerUsername=?) OR userId=? ORDER BY date"
+        )
+        params = (owner, owner)
+    else:
+        query = "SELECT * FROM entries ORDER BY date"
+        params = ()
+
     if month:
         if not MONTH_RE.match(month):
             raise ApiError("'month' must be YYYY-MM")
-        rows = db().execute(_sql("SELECT * FROM entries WHERE date LIKE ? ORDER BY date"), (month + "-%",))
-    else:
-        rows = db().execute("SELECT * FROM entries ORDER BY date")
+        query = query + " AND date LIKE ?"
+        params = params + (month + "-%",)
+
+    rows = db().execute(query, params).fetchall()
     return jsonify([dict(r) for r in rows])
 
 
 @app.put("/api/entries/<d>")
 def put_entry(d):
-    _, qty, price = parse_entry(d, request.get_json(silent=True) or {})
-    upsert(d, qty, price)
+    data = request.get_json(silent=True) or {}
+    user_id = chosen_user_id()
+    _, qty, morning_qty, evening_qty, price = parse_entry(d, data)
+    upsert(d, qty, morning_qty, evening_qty, price, user_id)
     db().commit()
-    return jsonify(get_entry(d))
+    entry = get_entry(d, user_id)
+    entry["userId"] = user_id
+    entry["qty"] = float(entry["qty"])
+    entry["morningQty"] = float(entry["morningQty"] or 0)
+    entry["eveningQty"] = float(entry["eveningQty"] or 0)
+    return jsonify(entry)
 
 
 @app.delete("/api/entries/<d>")
 def delete_entry(d):
     valid_date(d)
-    cur = db().execute(_sql("DELETE FROM entries WHERE date=?"), (d,))
+    user_id = chosen_user_id()
+    cur = db().execute(_sql("DELETE FROM entries WHERE date=? AND userId=?"), (d, user_id))
     db().commit()
     if not cur.rowcount:
         raise ApiError("No entry for that date", 404)
@@ -218,16 +372,29 @@ def bulk_entries():
     items = (request.get_json(silent=True) or {}).get("entries")
     if not isinstance(items, list):
         raise ApiError("'entries' must be a list")
-    rows = [parse_entry(i.get("date") if isinstance(i, dict) else None, i if isinstance(i, dict) else {}) for i in items]
-    for row in rows:  # all-or-nothing: validation above runs before any write
-        upsert(*row)
+    rows = []
+    for item in items:
+        if not isinstance(item, dict):
+            raise ApiError("Each entry must be an object")
+        user_id = str(item.get("userId") or chosen_user_id())
+        d = item.get("date")
+        if d is None:
+            raise ApiError("Each entry requires a date")
+        _, qty, morning_qty, evening_qty, price = parse_entry(d, item)
+        rows.append((d, user_id, qty, morning_qty, evening_qty, price))
+    for d, user_id, qty, morning_qty, evening_qty, price in rows:
+        upsert(d, qty, morning_qty, evening_qty, price, user_id)
     db().commit()
     return jsonify(imported=len(rows)), 201
 
 
 @app.delete("/api/entries")
 def clear_entries():
-    db().execute("DELETE FROM entries")
+    user_id = chosen_user_id()
+    if user_id:
+        db().execute(_sql("DELETE FROM entries WHERE userId=?"), (user_id,))
+    else:
+        db().execute("DELETE FROM entries")
     db().commit()
     return "", 204
 
@@ -235,6 +402,10 @@ def clear_entries():
 # ---------- prefs ----------
 @app.get("/api/prefs")
 def get_prefs():
+    if "username" not in session:
+        has_prefs = db().execute("SELECT 1 FROM prefs LIMIT 1").fetchone() is not None
+        if not has_prefs:
+            return jsonify(error="Authentication required"), 401
     return jsonify({r["key"]: r["value"] for r in db().execute("SELECT * FROM prefs")})
 
 
@@ -253,7 +424,7 @@ def put_prefs():
             (k, str(v)),
         )
     db().commit()
-    return get_prefs()
+    return jsonify({r["key"]: r["value"] for r in db().execute("SELECT * FROM prefs")})
 
 
 # ---------- frontend ----------
