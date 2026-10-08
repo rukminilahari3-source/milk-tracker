@@ -130,7 +130,7 @@ On first load, if the server has no entries and the browser holds data from v1.0
 
 ## Offline behaviour
 
-If the server is unreachable, the app shows the last saved copy and displays a warning. Saving, deleting, and importing are disabled until the server is back.
+If the API is unreachable, the app shows the last saved copy. New entries are saved on the current device and queued in browser storage; the app retries syncing them when the API becomes available or the browser comes back online. Entries still require a reachable API to appear on other devices. Deleting and importing require the API to be available.
 
 ---
 

@@ -218,16 +218,51 @@
 <script>
 const API=location.protocol==='file:'?'http://localhost:5000/api':
   location.hostname==='rukminilahari3-source.github.io'?'https://milklog-rukminilahari3-api.onrender.com/api':'/api';
-const CACHE_KEY='milklog_cache';let ENTRIES={},PREFS={};
+const CACHE_KEY='milklog_cache',PENDING_ENTRIES_KEY='milklog_pending_entries';let ENTRIES={},PREFS={},syncingPendingEntries=false,savingEntry=false;
 async function api(path,opts={}){
   const r=await fetch(API+path,{headers:{'Content-Type':'application/json'},...opts});
-  if(!r.ok)throw new Error((await r.json().catch(()=>({}))).error||'Server error');
+  if(!r.ok){
+    const error=new Error((await r.json().catch(()=>({}))).error||'Server error');
+    error.name='ApiError';error.status=r.status;throw error;
+  }
   return r.status===204?null:r.json();
 }
 function loadEntries(){return ENTRIES}
 function loadPrefs(){return PREFS}
 function cache(){localStorage.setItem(CACHE_KEY,JSON.stringify({ENTRIES,PREFS}))}
-async function refresh(){ENTRIES=Object.fromEntries((await api('/entries')).map(e=>[e.date,e]));cache()}
+function pendingEntries(){return JSON.parse(localStorage.getItem(PENDING_ENTRIES_KEY)||'{}')}
+function queueEntry(entry){const pending=pendingEntries();pending[entry.date]=entry;localStorage.setItem(PENDING_ENTRIES_KEY,JSON.stringify(pending))}
+function removePendingEntry(date){
+  const pending=pendingEntries();delete pending[date];
+  if(Object.keys(pending).length)localStorage.setItem(PENDING_ENTRIES_KEY,JSON.stringify(pending));
+  else localStorage.removeItem(PENDING_ENTRIES_KEY);
+}
+function isApiUnavailable(error){return error&&(error.name==='TypeError'||(error.name==='ApiError'&&[404,500,502,503,504].includes(error.status)))}
+async function syncPendingEntries(){
+  if(syncingPendingEntries)return;
+  syncingPendingEntries=true;
+  try{
+    for(const entry of Object.values(pendingEntries())){
+      try{
+        const saved=await api('/entries/'+entry.date,{method:'PUT',body:JSON.stringify({qty:entry.qty,price:entry.price})});
+        const current=pendingEntries()[entry.date];
+        if(current&&current.saved===entry.saved){
+          removePendingEntry(entry.date);ENTRIES[entry.date]=saved;cache();
+        }
+      }catch(error){
+        if(isApiUnavailable(error))return;
+        throw error;
+      }
+    }
+  }finally{syncingPendingEntries=false}
+}
+async function refresh(){
+  const entries=Object.fromEntries((await api('/entries')).map(e=>[e.date,e]));
+  Object.values(pendingEntries()).forEach(entry=>{entries[entry.date]=entry});
+  ENTRIES=entries;cache();
+}
+window.addEventListener('online',()=>syncPendingEntries().catch(e=>toast('⚠️ Sync failed: '+e.message)));
+window.addEventListener('focus',()=>syncPendingEntries().catch(e=>toast('⚠️ Sync failed: '+e.message)));
 function savePref(k,v){PREFS[k]=v;cache();api('/prefs',{method:'PUT',body:JSON.stringify({[k]:v})}).catch(e=>toast('⚠️ '+e.message))}
 let currentCalMonth=new Date();let currentSumMonth=new Date();
 currentCalMonth.setDate(1);currentSumMonth.setDate(1);
@@ -249,12 +284,26 @@ async function saveEntry(){
   const qty=parseFloat(document.getElementById('entryQty').value);
   const price=parseFloat(document.getElementById('entryPrice').value)||getDefaultPrice();
   if(!date){toast('⚠️ Please select a date');return}
-  if(!qty||qty<=0){toast('⚠️ Enter a valid quantity');return}
+  if(!Number.isFinite(qty)||qty<=0||qty>100){toast('⚠️ Enter a quantity between 0 and 100 litres');return}
+  if(!Number.isFinite(price)||price<0||price>10000){toast('⚠️ Enter a price between 0 and 10000');return}
+  if(savingEntry)return;
+  savingEntry=true;
+  const entry={date,qty,price,saved:Date.now()};
   try{
     ENTRIES[date]=await api('/entries/'+date,{method:'PUT',body:JSON.stringify({qty,price})});cache();
+    removePendingEntry(date);
     document.getElementById('entryQty').value='';
     toast('✓ Entry saved!');renderToday();renderCalendar();
-  }catch(e){toast('⚠️ '+e.message)}
+    syncPendingEntries().catch(e=>toast('⚠️ Sync failed: '+e.message));
+  }catch(e){
+    if(isApiUnavailable(e)){
+      ENTRIES[date]=entry;queueEntry(entry);cache();
+      document.getElementById('entryQty').value='';
+      toast('✓ Saved on this device. It will sync when the API is available.');
+      renderToday();renderCalendar();return;
+    }
+    toast('⚠️ '+e.message);
+  }finally{savingEntry=false}
 }
 async function deleteEntry(date){
   if(!confirm('Delete entry for '+date+'?'))return;
@@ -361,8 +410,10 @@ async function clearAllData(){
 }
 async function init(){
   setTodayDate();
+  let apiAvailable=false;
   try{
     await refresh();PREFS=await api('/prefs');
+    apiAvailable=true;
     // one-time upload of data saved by the old localStorage-only version
     const old=JSON.parse(localStorage.getItem('milktracker_entries')||'{}');
     if(!localStorage.getItem('milklog_migrated')&&Object.keys(old).length&&!Object.keys(ENTRIES).length){
@@ -375,6 +426,7 @@ async function init(){
     toast('⚠️ Server unreachable — showing saved copy');
   }
   loadSettings();renderToday();renderCalendar();
+  if(apiAvailable)syncPendingEntries().catch(e=>toast('⚠️ Sync failed: '+e.message));
 }
 init();
 </script>
