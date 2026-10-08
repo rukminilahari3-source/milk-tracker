@@ -318,26 +318,29 @@ def list_entries():
         if not has_rows:
             return jsonify(error="Authentication required"), 401
 
+    conditions = []
+    params = []
     if user:
-        query = _sql("SELECT * FROM entries WHERE userId=?")
-        params = (user,)
+        conditions.append("userId=?")
+        params.append(user)
     elif "username" in session:
         owner = session["username"]
-        query = _sql(
-            "SELECT * FROM entries WHERE userId IN (SELECT userId FROM user_profiles WHERE ownerUsername=?) OR userId=? ORDER BY date"
+        conditions.append(
+            "(userId IN (SELECT userId FROM user_profiles WHERE ownerUsername=?) OR userId=?)"
         )
-        params = (owner, owner)
-    else:
-        query = "SELECT * FROM entries ORDER BY date"
-        params = ()
+        params.extend((owner, owner))
 
     if month:
         if not MONTH_RE.match(month):
             raise ApiError("'month' must be YYYY-MM")
-        query = query + " AND date LIKE ?"
-        params = params + (month + "-%",)
+        conditions.append("date LIKE ?")
+        params.append(month + "-%")
 
-    rows = db().execute(query, params).fetchall()
+    query = "SELECT * FROM entries"
+    if conditions:
+        query += " WHERE " + " AND ".join(conditions)
+    query = _sql(query + " ORDER BY date")
+    rows = db().execute(query, tuple(params)).fetchall()
     return jsonify([dict(r) for r in rows])
 
 
