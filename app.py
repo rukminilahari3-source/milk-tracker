@@ -22,7 +22,7 @@ from datetime import date as Date
 from pathlib import Path
 
 from flask import Flask, g, jsonify, request, send_from_directory, session
-
+from werkzeug.security import generate_password_hash, check_password_hash
 BASE = Path(__file__).parent
 DB_PATH = Path(os.environ.get("MILKLOG_DB_PATH", BASE / "milklog.db"))
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip() or None
@@ -207,11 +207,13 @@ def parse_entry(d, data):
     return d, qty, morning_qty, evening_qty, price
 
 
+def login_required():
+    if "username" not in session:
+        raise ApiError("Authentication required", 401)
+
 def chosen_user_id():
-    query_user = request.args.get("user")
-    payload = request.get_json(silent=True) or {}
-    user_id = (payload.get("userId") or query_user or session.get("username") or "").strip()
-    return user_id or "default"
+    login_required()
+    return session["username"]
 
 
 def upsert(d, qty, morning_qty, evening_qty, price, user_id):
@@ -246,7 +248,8 @@ def register():
         raise ApiError("Username and password are required")
     if db().execute(_sql("SELECT 1 FROM users WHERE username=?"), (username,)).fetchone():
         raise ApiError("Username already exists", 409)
-    db().execute(_sql("INSERT INTO users (username, password) VALUES (?, ?)"), (username, password))
+    hashed_password = generate_password_hash(password)
+    db().execute(_sql("INSERT INTO users (username, password) VALUES (?, ?)"), (username, hashed_password))
     db().commit()
     session["username"] = username
     return jsonify({"username": username, "loggedIn": True}), 201

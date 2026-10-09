@@ -207,6 +207,16 @@
   </div>
 </div>
 
+<div id="login" style="display:none;position:fixed;inset:0;z-index:9000;background:var(--bg);padding:80px 24px">
+  <div class="card">
+    <div class="card-title">🔐 Sign in</div>
+    <div class="form-group"><label>Username</label><input type="text" id="lu"></div>
+    <div class="form-group"><label>Password</label><input type="password" id="lp"></div>
+    <button class="btn btn-primary" onclick="auth('login')">Login</button>
+    <button class="btn btn-outline" onclick="auth('register')">Create account</button>
+  </div>
+</div>
+
 <div id="toast"></div>
 <div class="bottom-nav">
   <button class="nav-item active" onclick="switchTab('today')" id="nav-today"><span class="nav-icon">📅</span>Today</button>
@@ -309,6 +319,20 @@ async function deleteEntry(date){
   if(!confirm('Delete entry for '+date+'?'))return;
   try{await api('/entries/'+date,{method:'DELETE'});delete ENTRIES[date];cache();renderToday();renderCalendar();toast('🗑 Entry deleted')}
   catch(e){toast('⚠️ '+e.message)}
+}
+async function auth(kind){
+  try{
+    await api('/'+kind,{method:'POST',body:JSON.stringify({
+      username:document.getElementById('lu').value.trim(),
+      password:document.getElementById('lp').value})});
+    document.getElementById('login').style.display='none';
+    init();
+  }catch(e){toast('⚠️ '+e.message)}
+}
+async function logout(){
+  await api('/logout',{method:'POST'}).catch(()=>{});
+  localStorage.removeItem(CACHE_KEY);localStorage.removeItem(PENDING_ENTRIES_KEY);
+  location.reload();
 }
 function renderToday(){
   const entries=loadEntries();
@@ -422,6 +446,7 @@ async function init(){
     }
     localStorage.setItem('milklog_migrated','1');cache();
   }catch(e){
+    if(e.status===401){document.getElementById('login').style.display='block';return}
     const c=JSON.parse(localStorage.getItem(CACHE_KEY)||'{}');ENTRIES=c.ENTRIES||{};PREFS=c.PREFS||{};
     toast('⚠️ Server unreachable — showing saved copy');
   }
@@ -429,6 +454,7 @@ async function init(){
   if(apiAvailable)syncPendingEntries().catch(e=>toast('⚠️ Sync failed: '+e.message));
 }
 init();
+
 </script>
 
 <!-- ═══════════════════════════════════════════════
